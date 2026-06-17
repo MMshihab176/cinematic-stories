@@ -1,11 +1,16 @@
 export function slugify(text: string): string {
-  return text
-    .toLowerCase()
+  const cleaned = text
     .trim()
-    .replace(/[^\w\s-]/g, '')   // remove non-word chars
-    .replace(/[\s_]+/g, '-')    // spaces/underscores -> hyphen
-    .replace(/-+/g, '-')        // collapse multiple hyphens
-    .replace(/^-|-$/g, '')      // trim leading/trailing hyphens
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  if (cleaned.length === 0) {
+    return `story-${Math.random().toString(36).slice(2, 8)}`
+  }
+  return cleaned
 }
 
 export function formatBytes(bytes: number): string {
