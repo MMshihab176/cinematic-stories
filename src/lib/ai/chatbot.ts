@@ -1,47 +1,76 @@
 // src/lib/ai/chatbot.ts
-import Anthropic from '@anthropic-ai/sdk'
-import { searchRelevantContext } from './embeddings'
+// Uses Google Gemini API (free tier) for the story chatbot
 import type { ChatMessage } from '@/types'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 
 export async function chatWithStory(
   storyId:    string,
   storyTitle: string,
   messages:   ChatMessage[]
 ): Promise<string> {
-  // Get the latest user message to build context
-  const latestUser = [...messages].reverse().find(m => m.role === 'user')
-  const query = latestUser?.content ?? ''
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set')
 
-  // Retrieve relevant story context via RAG
-  const contextChunks = await searchRelevantContext(storyId, query)
-  const contextBlock = contextChunks.length
-    ? `\n\nRelevant story content:\n${contextChunks.map((c, i) => `[${i+1}] ${c}`).join('\n\n')}`
-    : ''
+  const systemPrompt = `তুমি "${storyTitle}" গল্পের একজন বুদ্ধিমান সহকারী।
+তুমি পাঠকদের এই গল্প সম্পর্কে যেকোনো প্রশ্নের উত্তর দেবে:
+- চরিত্র এবং তাদের অনুপ্রেরণা
+- গল্পের timeline এবং ঘটনা
+- world-building এবং lore
+- অধ্যায়ের সারসংক্ষেপ
+- চরিত্রদের মধ্যে সম্পর্ক
+- থিম এবং প্রতীক
 
-  const systemPrompt = `You are an intelligent assistant for the story "${storyTitle}".
-Your role is to help readers understand the story by answering questions about:
-- Characters and their motivations
-- Plot timeline and events
-- World-building and lore
-- Chapter summaries and recaps
-- Relationships between characters
-- Themes and symbolism
+বাংলায় প্রশ্ন করলে বাংলায় উত্তর দাও। ইংরেজিতে প্রশ্ন করলে ইংরেজিতে উত্তর দাও।
+গল্পের বাইরের বিষয়ে প্রশ্ন করলে বিনয়ের সাথে জানাও যে তুমি শুধু এই গল্প সম্পর্কে সাহায্য করতে পারবে।`
 
-Only answer based on the story content provided. If the answer is not in the content, say so honestly.
-Be engaging and match the tone of the story.${contextBlock}`
+  // Build conversation history for Gemini
+  const geminiMessages = []
 
-  const response = await anthropic.messages.create({
-    model:      'claude-sonnet-4-6',
-    max_tokens: 800,
-    system:     systemPrompt,
-    messages:   messages.map(m => ({
-      role:    m.role,
-      content: m.content,
-    })),
+  // Add system context as first user message
+  geminiMessages.push({
+    role: 'user',
+    parts: [{ text: systemPrompt }]
+  })
+  geminiMessages.push({
+    role: 'model',
+    parts: [{ text: 'বুঝেছি! আমি এই গল্পের সহকারী হিসেবে সাহায্য করব।' }]
   })
 
-  const block = response.content[0]
-  return block.type === 'text' ? block.text : 'I could not generate a response.'
+  // Add conversation history
+  for (const msg of messages) {
+    geminiMessages.push({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }]
+    })
+  }
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: geminiMessages,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1000,
+      },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ]
+    })
+  })
+
+  if (!response.ok) {
+    const err = await response.json()
+    throw new Error(err.error?.message ?? 'Gemini API error')
+  }
+
+  const data = await response.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Empty response from Gemini')
+
+  return text
 }

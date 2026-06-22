@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
-import { createAdminClient } from '@/lib/supabase/server'
 import { chatWithStory } from '@/lib/ai/chatbot'
 import type { ChatMessage } from '@/types'
-
-const RATE_LIMIT = parseInt(process.env.CHATBOT_RATE_LIMIT ?? '20', 10)
 
 export async function POST(req: NextRequest) {
   let body: { storyId?: string; storyTitle?: string; messages?: ChatMessage[] }
@@ -20,51 +16,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'storyId, storyTitle and messages are required' }, { status: 400 })
   }
 
-  if (messages.length > 50) {
+  if (messages.length > 100) {
     return NextResponse.json({ error: 'Conversation too long' }, { status: 400 })
   }
 
-  // ─── Rate limiting (per IP, per hour) ─────────────────────────────────────
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    ?? req.headers.get('x-real-ip')
-    ?? 'unknown'
-  const ipHash  = crypto.createHash('sha256').update(ip).digest('hex')
-  const hourKey = new Date().toISOString().slice(0, 13) // e.g. 2026-06-15T14
-
-  const supabase = createAdminClient()
-
-  const { data: existing } = await supabase
-    .from('chatbot_rate_limits')
-    .select('count')
-    .eq('ip_hash', ipHash)
-    .eq('hour_key', hourKey)
-    .maybeSingle()
-
-  if (existing && existing.count >= RATE_LIMIT) {
-    return NextResponse.json(
-      { error: `Rate limit reached (${RATE_LIMIT} messages/hour). Please try again later.` },
-      { status: 429 }
-    )
-  }
-
-  await supabase.from('chatbot_rate_limits').upsert(
-    { ip_hash: ipHash, hour_key: hourKey, count: (existing?.count ?? 0) + 1 },
-    { onConflict: 'ip_hash,hour_key' }
-  )
-
-  // ─── Generate response ─────────────────────────────────────────────────────
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? ''
-  if (!apiKey || apiKey === 'sk-ant-placeholder' || apiKey.length < 20) {
+  // Check API key
+  const apiKey = process.env.GEMINI_API_KEY ?? ''
+  if (!apiKey || apiKey.length < 10) {
     return NextResponse.json({
-      reply: 'AI চ্যাটবট এখনো সক্রিয় করা হয়নি। সাইটের মালিককে Anthropic API key যোগ করতে বলুন।'
+      reply: 'AI চ্যাটবট এখনো সক্রিয় করা হয়নি। GEMINI_API_KEY সেট করতে হবে।'
     })
   }
 
   try {
-    const reply = await chatWithStory(storyId, storyTitle, messages.slice(-10))
+    const reply = await chatWithStory(storyId, storyTitle, messages.slice(-20))
     return NextResponse.json({ reply })
   } catch (err) {
-    console.error('Chatbot generation error:', err)
-    return NextResponse.json({ error: 'Failed to generate a response. Please try again.' }, { status: 500 })
+    console.error('Chatbot error:', err)
+    return NextResponse.json({
+      error: 'উত্তর দিতে সমস্যা হয়েছে। আবার চেষ্টা করুন।'
+    }, { status: 500 })
   }
 }
