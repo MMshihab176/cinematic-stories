@@ -53,6 +53,13 @@ export async function POST(req: NextRequest) {
   )
 
   // ─── Generate response ─────────────────────────────────────────────────────
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? ''
+  if (!apiKey || apiKey === 'sk-ant-placeholder' || apiKey.length < 20) {
+    return NextResponse.json({
+      reply: 'AI চ্যাটবট এখনো সক্রিয় করা হয়নি। সাইটের মালিককে Anthropic API key যোগ করতে বলুন।'
+    })
+  }
+
   try {
     const reply = await chatWithStory(storyId, storyTitle, messages.slice(-10))
     return NextResponse.json({ reply })

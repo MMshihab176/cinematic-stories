@@ -30,14 +30,13 @@ export function ChapterReader({ story, chapter, prev, next }: Props) {
   const scrollTimer = useRef<NodeJS.Timeout>()
 
   // Ensure a (possibly anonymous) Supabase session exists so progress/bookmarks persist
-  useReaderSession()
+  const userId = useReaderSession()
 
   // Apply atmosphere CSS vars to document root
   useEffect(() => {
     const root = document.documentElement
     Object.entries(cssVars).forEach(([k, v]) => root.style.setProperty(k, v))
     return () => {
-      // Restore defaults on unmount
       root.style.removeProperty('--atmo-bg')
       root.style.removeProperty('--atmo-accent')
     }
@@ -48,31 +47,34 @@ export function ChapterReader({ story, chapter, prev, next }: Props) {
     const onScroll = () => {
       clearTimeout(scrollTimer.current)
       scrollTimer.current = setTimeout(() => {
+        if (!userId) return
         const pos = Math.round((window.scrollY / document.body.scrollHeight) * 100)
         fetch('/api/progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chapter_id: chapter.id, story_id: story.id, scroll_position: pos }),
+          body: JSON.stringify({ chapter_id: chapter.id, story_id: story.id, scroll_position: pos, user_id: userId }),
         }).catch(() => {})
       }, 1000)
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => { window.removeEventListener('scroll', onScroll); clearTimeout(scrollTimer.current) }
-  }, [chapter.id, story.id])
+  }, [chapter.id, story.id, userId])
 
   // Load bookmark state — localStorage first (instant), then reconcile with server
   useEffect(() => {
     const bookmarks: string[] = JSON.parse(localStorage.getItem('bookmarks') ?? '[]')
     setIsBookmarked(bookmarks.includes(story.id))
 
-    fetch('/api/bookmarks')
-      .then(r => r.json())
-      .then((data: { bookmarks: { story_id: string }[] }) => {
-        const serverHas = data.bookmarks?.some(b => b.story_id === story.id)
-        if (serverHas) setIsBookmarked(true)
-      })
-      .catch(() => {})
-  }, [story.id])
+    if (userId) {
+      fetch(`/api/bookmarks?user_id=${userId}`)
+        .then(r => r.json())
+        .then((data: { bookmarks: { story_id: string }[] }) => {
+          const serverHas = data.bookmarks?.some(b => b.story_id === story.id)
+          if (serverHas) setIsBookmarked(true)
+        })
+        .catch(() => {})
+    }
+  }, [story.id, userId])
 
   const toggleBookmark = useCallback(() => {
     const bookmarks: string[] = JSON.parse(localStorage.getItem('bookmarks') ?? '[]')
@@ -87,12 +89,14 @@ export function ChapterReader({ story, chapter, prev, next }: Props) {
     localStorage.setItem('bookmarks', JSON.stringify(bookmarks))
     setIsBookmarked(next)
 
-    fetch('/api/bookmarks', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ story_id: story.id, action: next ? 'add' : 'remove' }),
-    }).catch(() => {})
-  }, [isBookmarked, story.id])
+    if (userId) {
+      fetch('/api/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ story_id: story.id, action: next ? 'add' : 'remove', user_id: userId }),
+      }).catch(() => {})
+    }
+  }, [isBookmarked, story.id, userId])
 
   // Hide controls on scroll down, show on scroll up
   useEffect(() => {
