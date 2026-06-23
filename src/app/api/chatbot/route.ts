@@ -16,15 +16,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'storyId, storyTitle and messages are required' }, { status: 400 })
   }
 
-  if (messages.length > 100) {
-    return NextResponse.json({ error: 'Conversation too long' }, { status: 400 })
-  }
-
-  // Check API key
-  const apiKey = process.env.GEMINI_API_KEY ?? ''
+  const apiKey = process.env.GROQ_API_KEY ?? ''
   if (!apiKey || apiKey.length < 10) {
     return NextResponse.json({
-      reply: 'AI চ্যাটবট এখনো সক্রিয় করা হয়নি। GEMINI_API_KEY সেট করতে হবে।'
+      reply: 'AI চ্যাটবট এখনো সক্রিয় করা হয়নি। GROQ_API_KEY সেট করতে হবে।'
     })
   }
 
